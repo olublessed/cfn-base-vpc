@@ -1,0 +1,571 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: 'Networking configuration for a standard, public facing application, separates private-public subnets and enforces traffic with NACL rules'
+Conditions:
+    cNeedNatInstance: !Equals [ false, !Ref pSupportsNatGateway ]
+    cSupportsNatGateway: !Equals [ true, !Ref pSupportsNatGateway ]
+    cEnableFlowLogs: !Not [ !Equals [ !Ref pFlowLogGroup, '' ] ]
+Parameters:
+    pRegionAZ1Name:
+        Description: Availability Zone 1 Name in Region
+        Type: AWS::EC2::AvailabilityZone::Name
+    pRegionAZ2Name:
+        Description: Availability Zone 2 Name in Region
+        Type: AWS::EC2::AvailabilityZone::Name
+    pVPCName:
+        Description: VPC Name
+        Type: String
+    pCIDR:
+        Description: CIDR block for VPC
+        Type: String
+        Default: 10.100.0.0/16
+    pManagementCIDR:
+        Description: CIDR of Management VPC
+        Type: String
+    pDMZSubnetACIDR:
+        Description: CIDR block for DMZ AZ-1b subnet
+        Type: String
+        Default: 10.100.10.0/24
+    pDMZSubnetBCIDR:
+        Description: CIDR block for DMZ AZ-1b subnet
+        Type: String
+        Default: 10.100.20.0/24
+    pAppPrivateSubnetACIDR:
+        Description: CIDR block for Application AZ-1a subnet
+        Type: String
+        Default: 10.100.96.0/21
+    pAppPrivateSubnetBCIDR:
+        Description: CIDR block for Application AZ-1b subnet
+        Type: String
+        Default: 10.100.119.0/21
+    pDBPrivateSubnetACIDR:
+        Description: CIDR block for Private AZ-1a subnet
+        Type: String
+        Default: 10.100.194.0/21
+    pDBPrivateSubnetBCIDR:
+        Description: CIDR block for Private AZ-1b subnet
+        Type: String
+        Default: 10.100.212.0/21
+    pEC2KeyPair:
+        Description: Name of existing EC2 key pair for hosts
+        Type: String
+        Default: ''
+    pVPCTenancy:
+        Description: Instance tenancy behavior for this VPC
+        Type: String
+        Default: default
+        AllowedValues:
+          - default
+          - dedicated
+    pEnvironment:
+        Description: Environment (development, test, or production)
+        Type: String
+        Default: development
+    pSupportsNatGateway:
+        Description: Specifies whether this region supports NAT Gateway (this value is determined by the main stack if it is invoked from there)
+        Type: String
+        Default: true
+    pNatAmi:
+        Description: AMI to use for the NAT intstance if the region does not support NAT Gateway (this value is determined by the main stack if it is invoked from there)
+        Type: String
+        Default: ''
+    pNatInstanceType:
+        Description: Instance type to use for the NAT intstance if the region does not support NAT Gateway (this value is determined by the main stack if it is invoked from there)
+        Type: String
+        Default: ''
+    pFlowLogGroup:
+          Description: Log Group for capturing VPC Flow Logs
+          Type: String
+          Default: ''
+    pTemplates:
+        Description: Location of templates
+        Type: String
+Resources:
+    rVPC:
+        Type: 'AWS::EC2::VPC'
+        Properties:
+            CidrBlock: !Ref pCIDR
+            InstanceTenancy: !Ref pVPCTenancy
+            EnableDnsSupport: true
+            EnableDnsHostnames: true
+            Tags:
+              - Key: Name
+                Value: !Ref pVPCName
+              - Key: Environment
+                Value: !Ref pEnvironment
+    rSecurityGroupVpcNat:
+        Type: 'AWS::EC2::SecurityGroup'
+        Properties:
+            GroupDescription: Allow NAT
+            VpcId: !Ref rVPC
+            SecurityGroupIngress:
+              - IpProtocol: tcp
+                FromPort: 80
+                ToPort: 80
+                CidrIp: !Ref pCIDR
+              - IpProtocol: tcp
+                FromPort: 443
+                ToPort: 443
+                CidrIp: !Ref pCIDR
+            Tags:
+              - Key: Name
+                Value: sg-web-access-ports
+              - Key: Environment
+                Value: !Ref pEnvironment
+    rSecurityGroupSSH:
+        Type: 'AWS::EC2::SecurityGroup'
+        Properties:
+            GroupDescription: Enable SSH access via port 22
+            VpcId: !Ref rVPC
+            SecurityGroupIngress:
+              - IpProtocol: tcp
+                FromPort: 22
+                ToPort: 22
+                CidrIp: !Ref pCIDR
+            Tags:
+              - Key: Name
+                Value: sg-enable-ssh-access
+              - Key: Environment
+                Value: !Ref pEnvironment
+    rDMZSubnetA:
+        Type: 'AWS::EC2::Subnet'
+        Properties:
+            CidrBlock: !Ref pDMZSubnetACIDR
+            AvailabilityZone: !Ref pRegionAZ1Name
+            VpcId: !Ref rVPC
+            Tags:
+              - Key: Name
+                Value: DMZ Subnet A
+              - Key: Environment
+                Value: !Ref pEnvironment
+    rDMZSubnetB:
+        Type: 'AWS::EC2::Subnet'
+        Properties:
+            CidrBlock: !Ref pDMZSubnetBCIDR
+            AvailabilityZone: !Ref pRegionAZ2Name
+            VpcId: !Ref rVPC
+            Tags:
+              - Key: Name
+                Value: DMZ Subnet B
+              - Key: Environment
+                Value: !Ref pEnvironment
+    rAppPrivateSubnetA:
+        Type: 'AWS::EC2::Subnet'
+        Properties:
+            CidrBlock: !Ref pAppPrivateSubnetACIDR
+            AvailabilityZone: !Ref pRegionAZ1Name
+            VpcId: !Ref rVPC
+            Tags:
+              - Key: Name
+                Value: App Subnet A
+              - Key: Environment
+                Value: !Ref pEnvironment
+    rAppPrivateSubnetB:
+        Type: 'AWS::EC2::Subnet'
+        Properties:
+            CidrBlock: !Ref pAppPrivateSubnetBCIDR
+            AvailabilityZone: !Ref pRegionAZ2Name
+            VpcId: !Ref rVPC
+            Tags:
+              - Key: Name
+                Value: App Subnet B
+              - Key: Environment
+                Value: !Ref pEnvironment
+    rDBPrivateSubnetA:
+        Type: 'AWS::EC2::Subnet'
+        Properties:
+            CidrBlock: !Ref pDBPrivateSubnetACIDR
+            AvailabilityZone: !Ref pRegionAZ1Name
+            VpcId: !Ref rVPC
+            Tags:
+              - Key: Name
+                Value: DB Subnet A
+              - Key: Environment
+                Value: !Ref pEnvironment
+    rDBPrivateSubnetB:
+        Type: 'AWS::EC2::Subnet'
+        Properties:
+            CidrBlock: !Ref pDBPrivateSubnetBCIDR
+            AvailabilityZone: !Ref pRegionAZ2Name
+            VpcId: !Ref rVPC
+            Tags:
+              - Key: Name
+                Value: DB Subnet B
+              - Key: Environment
+                Value: !Ref pEnvironment
+    rIGW:
+        Type: 'AWS::EC2::InternetGateway'
+        Properties:
+            Tags:
+              - Key: Name
+                Value: igw
+              - Key: Environment
+                Value: !Ref pEnvironment
+    rNACLPublic:
+        Type: 'AWS::EC2::NetworkAcl'
+        Properties:
+            VpcId: !Ref rVPC
+    rNACLPrivate:
+        Type: 'AWS::EC2::NetworkAcl'
+        Properties:
+            VpcId: !Ref rVPC
+    rRouteTableDMZ:
+        Type: 'AWS::EC2::RouteTable'
+        Properties:
+            VpcId: !Ref rVPC
+            Tags:
+              - Key: Name
+                Value: DMZ Route
+    rEIPNatA:
+        Type: 'AWS::EC2::EIP'
+        Properties:
+            Domain: vpc
+    rNATGatewaySubnetA:
+        Type: 'AWS::EC2::NatGateway'
+        DependsOn: rIGW
+        Condition: cSupportsNatGateway
+        Properties:
+            AllocationId: !GetAtt rEIPNatA.AllocationId
+            SubnetId: !Ref rDMZSubnetA
+    rEIPNatB:
+        Type: 'AWS::EC2::EIP'
+        Properties:
+            Domain: vpc
+    rNATGatewaySubnetB:
+        Type: 'AWS::EC2::NatGateway'
+        DependsOn: rIGW
+        Condition: cSupportsNatGateway
+        Properties:
+            AllocationId: !GetAtt rEIPNatB.AllocationId
+            SubnetId: !Ref rDMZSubnetB
+    rNatInstanceTemplate:
+        Type: 'AWS::CloudFormation::Stack'
+        Condition: cNeedNatInstance
+        Properties:
+            TemplateURL: !Sub '${pTemplates}/nat-instance.yaml'
+            TimeoutInMinutes: 20
+            Parameters:
+                pDMZSubnetA: !Ref rDMZSubnetA
+                pSecurityGroupSSHFromVpc: !Ref rSecurityGroupSSH
+                pSecurityGroupVpcNat: !Ref rSecurityGroupVpcNat
+                pNatAmi: !Ref pNatAmi
+                pNatInstanceType: !Ref pNatInstanceType
+                pEC2KeyPair: !Ref pEC2KeyPair
+                pVpcId: !Ref rVPC
+                pVpcName: !Ref pVPCName
+                pRouteTablePrivate: !Ref rRouteTablePrivateA
+                pEipNatAllocationId: !GetAtt rEIPNatA.AllocationId
+    rRouteIGW:
+        Type: 'AWS::EC2::Route'
+        DependsOn: rGWAttachmentIGW
+        Properties:
+            RouteTableId: !Ref rRouteTableDMZ
+            GatewayId: !Ref rIGW
+            DestinationCidrBlock: 0.0.0.0/0
+    rRoutePrivateNatGatewayA:
+        Type: 'AWS::EC2::Route'
+        Condition: cSupportsNatGateway
+        Properties:
+            DestinationCidrBlock: 0.0.0.0/0
+            RouteTableId: !Ref rRouteTablePrivateA
+            NatGatewayId: !Ref rNATGatewaySubnetA
+    rRoutePrivateNatGatewayB:
+        Type: 'AWS::EC2::Route'
+        Condition: cSupportsNatGateway
+        Properties:
+            DestinationCidrBlock: 0.0.0.0/0
+            RouteTableId: !Ref rRouteTablePrivateB
+            NatGatewayId: !Ref rNATGatewaySubnetB
+    rRouteAssocDMZA:
+        Type: 'AWS::EC2::SubnetRouteTableAssociation'
+        Properties:
+            RouteTableId: !Ref rRouteTableDMZ
+            SubnetId: !Ref rDMZSubnetA
+    rRouteAssocDMZB:
+        Type: 'AWS::EC2::SubnetRouteTableAssociation'
+        Properties:
+            RouteTableId: !Ref rRouteTableDMZ
+            SubnetId: !Ref rDMZSubnetB
+    rAppPrivateSubnetAssociationA:
+        Type: 'AWS::EC2::SubnetRouteTableAssociation'
+        Properties:
+            RouteTableId: !Ref rRouteTablePrivateA
+            SubnetId: !Ref rAppPrivateSubnetA
+    rAppPrivateSubnetAssociationB:
+        Type: 'AWS::EC2::SubnetRouteTableAssociation'
+        Properties:
+            RouteTableId: !Ref rRouteTablePrivateB
+            SubnetId: !Ref rAppPrivateSubnetB
+    rRouteAssocDBPrivateA:
+        Type: 'AWS::EC2::SubnetRouteTableAssociation'
+        Properties:
+            RouteTableId: !Ref rRouteTablePrivateA
+            SubnetId: !Ref rDBPrivateSubnetA
+    rRouteAssocDBPrivateB:
+        Type: 'AWS::EC2::SubnetRouteTableAssociation'
+        Properties:
+            RouteTableId: !Ref rRouteTablePrivateB
+            SubnetId: !Ref rDBPrivateSubnetB
+    rRouteTablePrivateA:
+        Type: 'AWS::EC2::RouteTable'
+        Properties:
+            VpcId: !Ref rVPC
+            Tags:
+              - Key: Name
+                Value: Private Route A
+    rRouteTablePrivateB:
+        Type: 'AWS::EC2::RouteTable'
+        Properties:
+            VpcId: !Ref rVPC
+            Tags:
+              - Key: Name
+                Value: Private Route B
+    rNACLRuleAllowAllTCPInternal:
+        Type: 'AWS::EC2::NetworkAclEntry'
+        Properties:
+            CidrBlock: !Ref pCIDR
+            Protocol: 6
+            PortRange:
+                From: 1
+                To: 65535
+            RuleAction: allow
+            RuleNumber: 120
+            NetworkAclId: !Ref rNACLPrivate
+    rNACLRuleAllowBastionSSHAccessPrivate:
+        Type: 'AWS::EC2::NetworkAclEntry'
+        Properties:
+            CidrBlock: 0.0.0.0/0
+            Protocol: 6
+            PortRange:
+                From: 22
+                To: 22
+            RuleAction: allow
+            RuleNumber: 130
+            NetworkAclId: !Ref rNACLPrivate
+    rNACLRuleAllowMgmtAccessSSHtoPrivate:
+        Type: 'AWS::EC2::NetworkAclEntry'
+        Properties:
+            CidrBlock: !Ref pManagementCIDR
+            Protocol: 6
+            PortRange:
+                From: 22
+                To: 22
+            RuleAction: allow
+            RuleNumber: 125
+            NetworkAclId: !Ref rNACLPrivate
+    rNACLRuleAllowReturnTCPPriv:
+        Type: 'AWS::EC2::NetworkAclEntry'
+        Properties:
+            CidrBlock: 0.0.0.0/0
+            Protocol: 6
+            PortRange:
+                From: 1024
+                To: 65535
+            RuleAction: allow
+            RuleNumber: 140
+            NetworkAclId: !Ref rNACLPrivate
+    rNACLRuleAllowALLfromPrivEgress:
+        Type: 'AWS::EC2::NetworkAclEntry'
+        Properties:
+            CidrBlock: 0.0.0.0/0
+            Egress: true
+            Protocol: 6
+            PortRange:
+                From: 1
+                To: 65535
+            RuleAction: allow
+            RuleNumber: 120
+            NetworkAclId: !Ref rNACLPrivate
+    rNACLRuleAllowAllTCPInternalEgress:
+        Type: 'AWS::EC2::NetworkAclEntry'
+        Properties:
+            CidrBlock: 0.0.0.0/0
+            Egress: true
+            Protocol: 6
+            PortRange:
+                From: 1
+                To: 65535
+            RuleAction: allow
+            RuleNumber: 100
+            NetworkAclId: !Ref rNACLPrivate
+    rNACLRuleAllowALLEgressPublic:
+        Type: 'AWS::EC2::NetworkAclEntry'
+        Properties:
+            CidrBlock: 0.0.0.0/0
+            Egress: true
+            Protocol: 6
+            PortRange:
+                From: 1
+                To: 65535
+            RuleAction: allow
+            RuleNumber: 100
+            NetworkAclId: !Ref rNACLPublic
+    rNACLRuleAllowAllReturnTCP:
+        Type: 'AWS::EC2::NetworkAclEntry'
+        Properties:
+            CidrBlock: 0.0.0.0/0
+            Protocol: 6
+            PortRange:
+                From: 1024
+                To: 65535
+            RuleAction: allow
+            RuleNumber: 140
+            NetworkAclId: !Ref rNACLPublic
+    rNACLRuleAllowHTTP:
+        Type: 'AWS::EC2::NetworkAclEntry'
+        Properties:
+            CidrBlock: !Ref pCIDR
+            Protocol: 6
+            PortRange:
+                From: 80
+                To: 80
+            RuleAction: allow
+            RuleNumber: 200
+            NetworkAclId: !Ref rNACLPublic
+    rNACLRuleAllowBastionSSHAccessPublic:
+        Type: 'AWS::EC2::NetworkAclEntry'
+        Properties:
+            CidrBlock: 0.0.0.0/0
+            Protocol: 6
+            PortRange:
+                From: 22
+                To: 22
+            RuleAction: allow
+            RuleNumber: 210
+            NetworkAclId: !Ref rNACLPublic
+    rNACLRuleAllowEgressReturnTCP:
+        Type: 'AWS::EC2::NetworkAclEntry'
+        Properties:
+            CidrBlock: 0.0.0.0/0
+            Egress: true
+            Protocol: 6
+            PortRange:
+                From: 1024
+                To: 65535
+            RuleAction: allow
+            RuleNumber: 140
+            NetworkAclId: !Ref rNACLPublic
+    rNACLRuleAllowHTTPSPublic:
+        Type: 'AWS::EC2::NetworkAclEntry'
+        Properties:
+            CidrBlock: 0.0.0.0/0
+            Protocol: 6
+            PortRange:
+                From: 443
+                To: 443
+            RuleAction: allow
+            RuleNumber: 100
+            NetworkAclId: !Ref rNACLPublic
+    rNACLAssocAppPrivSubnetB:
+        Type: 'AWS::EC2::SubnetNetworkAclAssociation'
+        Properties:
+            NetworkAclId: !Ref rNACLPrivate
+            SubnetId: !Ref rAppPrivateSubnetB
+    rNACLAssocDMZPubSubnetA:
+        Type: 'AWS::EC2::SubnetNetworkAclAssociation'
+        Properties:
+            NetworkAclId: !Ref rNACLPublic
+            SubnetId: !Ref rDMZSubnetA
+    rNACLAssocDMZPubSubnetB:
+        Type: 'AWS::EC2::SubnetNetworkAclAssociation'
+        Properties:
+            NetworkAclId: !Ref rNACLPublic
+            SubnetId: !Ref rDMZSubnetB
+    rNACLAssocAppPrivSubnetA:
+        Type: 'AWS::EC2::SubnetNetworkAclAssociation'
+        Properties:
+            NetworkAclId: !Ref rNACLPrivate
+            SubnetId: !Ref rAppPrivateSubnetA
+    rNACLAssocDBPrivSubnetA:
+        Type: 'AWS::EC2::SubnetNetworkAclAssociation'
+        Properties:
+            NetworkAclId: !Ref rNACLPrivate
+            SubnetId: !Ref rDBPrivateSubnetA
+    rNACLAssocDBPrivSubnetB:
+        Type: 'AWS::EC2::SubnetNetworkAclAssociation'
+        Properties:
+            NetworkAclId: !Ref rNACLPrivate
+            SubnetId: !Ref rDBPrivateSubnetB
+    rGWAttachmentIGW:
+        Type: 'AWS::EC2::VPCGatewayAttachment'
+        DependsOn: rIGW
+        Properties:
+            VpcId: !Ref rVPC
+            InternetGatewayId: !Ref rIGW
+    rVpcFlowLogsServiceRole:
+        Type: 'AWS::IAM::Role'
+        Condition: cEnableFlowLogs
+        Properties:
+            AssumeRolePolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Sid: AllowFlowLogs
+                    Effect: Allow
+                    Principal:
+                        Service: vpc-flow-logs.amazonaws.com
+                    Action: sts:AssumeRole
+            Path: /
+            Policies:
+              - PolicyName: cloudwatchlogsrole
+                PolicyDocument:
+                    Version: 2012-10-17
+                    Statement:
+                      - Action:
+                          - logs:CreateLogGroup
+                          - logs:CreateLogStream
+                          - logs:PutLogEvents
+                          - logs:DescribeLogGroups
+                          - logs:DescribeLogStreams
+                        Effect: Allow
+                        Resource: '*'
+    rVpcFlowLog:
+        Type: 'AWS::EC2::FlowLog'
+        Condition: cEnableFlowLogs
+        Properties:
+            DeliverLogsPermissionArn: !GetAtt rVpcFlowLogsServiceRole.Arn
+            LogGroupName: !Ref pFlowLogGroup
+            ResourceId: !Ref rVPC
+            ResourceType: VPC
+            TrafficType: ALL
+    rVpcFlowLogStream:
+        Type: 'AWS::Logs::LogStream'
+        Condition: cEnableFlowLogs
+        Properties:
+            LogGroupName: !Ref pFlowLogGroup
+    rEndpointS3:
+        Type: 'AWS::EC2::VPCEndpoint'
+        Properties:
+          RouteTableIds:
+            - !Ref rRouteTableDMZ
+            - !Ref rRouteTablePrivateA
+            - !Ref rRouteTablePrivateB
+          ServiceName: !Sub 'com.amazonaws.${AWS::Region}.s3'
+          VpcId: !Ref rVPC
+Outputs:
+    rVPC:
+        Value: !Ref rVPC
+    rDMZSubnetA:
+        Value: !Ref rDMZSubnetA
+    rDMZSubnetB:
+        Value: !Ref rDMZSubnetB
+    rRouteTablePrivateA:
+        Value: !Ref rRouteTablePrivateA
+    rRouteTablePrivateB:
+        Value: !Ref rRouteTablePrivateB
+    rRouteTableDMZ:
+        Value: !Ref rRouteTableDMZ
+    rAppPrivateSubnetA:
+        Value: !Ref rAppPrivateSubnetA
+    rAppPrivateSubnetB:
+        Value: !Ref rAppPrivateSubnetB
+    rDBPrivateSubnetA:
+        Value: !Ref rDBPrivateSubnetA
+    rDBPrivateSubnetB:
+        Value: !Ref rDBPrivateSubnetB
+    rSecurityGroupVpcNat:
+        Value: !Ref rSecurityGroupVpcNat
+    CfnStacksId:
+        Description: cfn-stacks.com artifact id
+        Value: @artifactId@
+    CfnStacksVersion:
+        Description: cfn-stacks.com artifact version
+        Value: v@version@
