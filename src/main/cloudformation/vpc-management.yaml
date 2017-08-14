@@ -434,21 +434,41 @@ Resources:
                 Value: vpc-peer-production-management
               - Key: Environment
                 Value: !Ref pEnvironment
-    rRouteProdPrivateMgmt:
+    rRouteProdMgmtDMZ:
+        Type: 'AWS::EC2::Route'
+        Condition: cCreatePeeringProduction
+        Properties:
+            RouteTableId: !Ref rRouteTableMgmtDMZ
+            VpcPeeringConnectionId: !Ref rPeeringConnectionProduction
+            DestinationCidrBlock: !Ref pProductionCIDR
+    rRouteProdMgmtPrivate:
         Type: 'AWS::EC2::Route'
         Condition: cCreatePeeringProduction
         Properties:
             RouteTableId: !Ref rRouteTableMgmtPrivate
             VpcPeeringConnectionId: !Ref rPeeringConnectionProduction
-            DestinationCidrBlock: !Ref pManagementCIDR
-    rRouteProdMgmtDMZ:
+            DestinationCidrBlock: !Ref pProductionCIDR
+    rRouteMgmtProdDMZ:
         Type: 'AWS::EC2::Route'
         Condition: cCreatePeeringProduction
         Properties:
             RouteTableId: !Ref pRouteTableProdDMZ
             VpcPeeringConnectionId: !Ref rPeeringConnectionProduction
             DestinationCidrBlock: !Ref pManagementCIDR
-
+    rRouteMgmtProdPrivateA:
+        Type: 'AWS::EC2::Route'
+        Condition: cCreatePeeringProduction
+        Properties:
+            RouteTableId: !Ref pRouteTableProdPrivateA
+            VpcPeeringConnectionId: !Ref rPeeringConnectionProduction
+            DestinationCidrBlock: !Ref pManagementCIDR
+    rRouteMgmtProdPrivateB:
+        Type: 'AWS::EC2::Route'
+        Condition: cCreatePeeringProduction
+        Properties:
+            RouteTableId: !Ref pRouteTableProdPrivateB
+            VpcPeeringConnectionId: !Ref rPeeringConnectionProduction
+            DestinationCidrBlock: !Ref pManagementCIDR
     rPeeringConnectionStaging:
         Type: 'AWS::EC2::VPCPeeringConnection'
         Condition: cCreatePeeringStaging
@@ -460,21 +480,41 @@ Resources:
                 Value: vpc-peer-staging-management
               - Key: Environment
                 Value: !Ref pEnvironment
-    rRouteMgmtStagingPrivate:
+    rRouteStagingMgmtDMZ:
+        Type: 'AWS::EC2::Route'
+        Condition: cCreatePeeringStaging
+        Properties:
+            RouteTableId: !Ref rRouteTableMgmtDMZ
+            VpcPeeringConnectionId: !Ref rPeeringConnectionStaging
+            DestinationCidrBlock: !Ref pStagingCIDR
+    rRouteStagingMgmtPrivate:
         Type: 'AWS::EC2::Route'
         Condition: cCreatePeeringStaging
         Properties:
             RouteTableId: !Ref rRouteTableMgmtPrivate
             VpcPeeringConnectionId: !Ref rPeeringConnectionStaging
             DestinationCidrBlock: !Ref pStagingCIDR
-    rRouteStagingMgmtDMZ:
+    rRouteMgmtStagingDMZ:
         Type: 'AWS::EC2::Route'
         Condition: cCreatePeeringStaging
         Properties:
             RouteTableId: !Ref pRouteTableStagingDMZ
             VpcPeeringConnectionId: !Ref rPeeringConnectionStaging
             DestinationCidrBlock: !Ref pManagementCIDR
-
+    rRouteMgmtStagingPrivateA:
+        Type: 'AWS::EC2::Route'
+        Condition: cCreatePeeringStaging
+        Properties:
+            RouteTableId: !Ref pRouteTableStagingPrivateA
+            VpcPeeringConnectionId: !Ref rPeeringConnectionStaging
+            DestinationCidrBlock: !Ref pManagementCIDR
+    rRouteMgmtStagingPrivateB:
+        Type: 'AWS::EC2::Route'
+        Condition: cCreatePeeringStaging
+        Properties:
+            RouteTableId: !Ref pRouteTableStagingPrivateB
+            VpcPeeringConnectionId: !Ref rPeeringConnectionStaging
+            DestinationCidrBlock: !Ref pManagementCIDR
     rPeeringConnectionTest:
         Type: 'AWS::EC2::VPCPeeringConnection'
         Condition: cCreatePeeringTest
@@ -486,7 +526,14 @@ Resources:
                 Value: vpc-peer-test-management
               - Key: Environment
                 Value: !Ref pEnvironment
-    rRouteMgmtTestPrivate:
+    rRouteTestMgmtDMZ:
+        Type: 'AWS::EC2::Route'
+        Condition: cCreatePeeringTest
+        Properties:
+            RouteTableId: !Ref rRouteTableMgmtDMZ
+            VpcPeeringConnectionId: !Ref rPeeringConnectionTest
+            DestinationCidrBlock: !Ref pTestCIDR
+    rRouteTestMgmtPrivate:
         Type: 'AWS::EC2::Route'
         Condition: cCreatePeeringTest
         Properties:
@@ -497,10 +544,23 @@ Resources:
         Type: 'AWS::EC2::Route'
         Condition: cCreatePeeringTest
         Properties:
-            RouteTableId: !Ref rRouteTableMgmtDMZ
+            RouteTableId: !Ref pRouteTableTestDMZ
             VpcPeeringConnectionId: !Ref rPeeringConnectionTest
-            DestinationCidrBlock: !Ref pTestCIDR
-
+            DestinationCidrBlock: !Ref pManagementCIDR
+    rRouteMgmtTestPrivateA:
+        Type: 'AWS::EC2::Route'
+        Condition: cCreatePeeringTest
+        Properties:
+            RouteTableId: !Ref pRouteTableTestPrivateA
+            VpcPeeringConnectionId: !Ref rPeeringConnectionTest
+            DestinationCidrBlock: !Ref pManagementCIDR
+    rRouteMgmtTestPrivateB:
+        Type: 'AWS::EC2::Route'
+        Condition: cCreatePeeringTest
+        Properties:
+            RouteTableId: !Ref pRouteTableTestPrivateB
+            VpcPeeringConnectionId: !Ref rPeeringConnectionTest
+            DestinationCidrBlock: !Ref pManagementCIDR
     rPeeringConnectionDev:
         Type: 'AWS::EC2::VPCPeeringConnection'
         Condition: cCreatePeeringDev
@@ -512,7 +572,14 @@ Resources:
                 Value: vpc-peer-dev-management
               - Key: Environment
                 Value: !Ref pEnvironment
-    rRouteMgmtDevPrivate:
+    rRouteDevMgmtDMZ:
+        Type: 'AWS::EC2::Route'
+        Condition: cCreatePeeringDev
+        Properties:
+            RouteTableId: !Ref rRouteTableMgmtDMZ
+            VpcPeeringConnectionId: !Ref rPeeringConnectionDev
+            DestinationCidrBlock: !Ref pDevCIDR
+    rRouteDevMgmtPrivate:
         Type: 'AWS::EC2::Route'
         Condition: cCreatePeeringDev
         Properties:
@@ -523,9 +590,23 @@ Resources:
         Type: 'AWS::EC2::Route'
         Condition: cCreatePeeringDev
         Properties:
-            RouteTableId: !Ref rRouteTableMgmtDMZ
+            RouteTableId: !Ref pRouteTableDevDMZ
             VpcPeeringConnectionId: !Ref rPeeringConnectionDev
-            DestinationCidrBlock: !Ref pDevCIDR
+            DestinationCidrBlock: !Ref pManagementCIDR
+    rRouteMgmtDevPrivateA:
+        Type: 'AWS::EC2::Route'
+        Condition: cCreatePeeringDev
+        Properties:
+            RouteTableId: !Ref pRouteTableDevPrivateA
+            VpcPeeringConnectionId: !Ref rPeeringConnectionDev
+            DestinationCidrBlock: !Ref pManagementCIDR
+    rRouteMgmtDevPrivateB:
+        Type: 'AWS::EC2::Route'
+        Condition: cCreatePeeringDev
+        Properties:
+            RouteTableId: !Ref pRouteTableDevPrivateB
+            VpcPeeringConnectionId: !Ref rPeeringConnectionDev
+            DestinationCidrBlock: !Ref pManagementCIDR
 
     rManagementVpcFlowLogsServiceRole:
         Type: 'AWS::IAM::Role'
