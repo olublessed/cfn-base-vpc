@@ -1,0 +1,212 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: 'Reverse proxy server'
+Parameters:
+  VPC:
+    Description: VPC into which the proxy servers will be deployed
+    Type: String
+  CIDR:
+    Description: CIDR block of the VPC
+    Type: String
+  ManagementCIDR:
+    Description: CIDR block of the management VPC
+    Type: String
+  SubnetA:
+    Description: Subnet
+    Type: String
+  SubnetB:
+    Description: Subnet
+    Type: String
+  MinSize:
+    Description: Minimum number of proxy servers in ASG
+    Type: Number
+    Default: 2
+  MaxSize:
+    Description: Maximum number of proxy servers in ASG
+    Type: Number
+    Default: 4
+  ConfigFile:
+    Description: Configuration file content of NGinx proxy server
+    Type: String
+    Default: ''
+  ProxyAMI:
+    Description: AMI used for proxy servers
+    Type: String
+  ProxyInstanceType:
+    Description: EC2 instance type of proxy servers
+    Type: String
+    Default: t2.small
+  ProxyKeyName:
+    Description: EC2 keyname to assist with debugging instances
+    Type: String
+    Default: ''
+Resources:
+  ELBProxy:
+    Type: 'AWS::ElasticLoadBalancing::LoadBalancer'
+    Properties:
+      Subnets:
+        - !Ref SubnetA
+        - !Ref SubnetB
+      HealthCheck:
+        HealthyThreshold: 2
+        Interval: 30
+        Target: TCP:80
+        Timeout: 5
+        UnhealthyThreshold: 5
+      #TODO: Add back ELB logging
+#      AccessLoggingPolicy:
+#        S3BucketName: !Ref rS3ELBAccessLogs
+#        S3BucketPrefix: Logs
+#        Enabled: true
+#        EmitInterval: 60
+      SecurityGroups:
+        - !Ref SecurityGroupProxyELB
+      Listeners:
+        - InstancePort: 80
+          LoadBalancerPort: 80
+          Protocol: HTTP
+          InstanceProtocol: HTTP
+      Tags:
+        - Key: Name
+          Value: 'Proxy ELB'
+#        - Key: Environment
+#          Value: !Ref pEnvironment
+
+  AutoScalingGroupProxy:
+    Type: 'AWS::AutoScaling::AutoScalingGroup'
+    Properties:
+      VPCZoneIdentifier:
+        - !Ref SubnetA
+        - !Ref SubnetB
+      LaunchConfigurationName: !Ref AutoScalingConfigProxy
+      MinSize: !Ref MinSize
+      MaxSize: !Ref MaxSize
+      LoadBalancerNames:
+        - !Ref ELBProxy
+      HealthCheckType: ELB
+      HealthCheckGracePeriod: 300
+      Tags:
+        - Key: Name
+          Value: 'Proxy Server'
+          PropagateAtLaunch: true
+#        - Key: Environment
+#          Value: !Ref pEnvironment
+#          PropagateAtLaunch: true
+
+  AutoScalingConfigProxy:
+    Type: 'AWS::AutoScaling::LaunchConfiguration'
+    Metadata:
+      AWS::CloudFormation::Init:
+        config:
+          packages:
+            yum:
+              nginx: []
+          files:
+            /tmp/nginx/default.conf:
+              content: !Ref ConfigFile
+              mode: '000755'
+              owner: root
+              group: root
+          commands:
+            01-nginx-setup:
+              command: |
+                echo 'Replace resolver placeholder with /etc/resolv.conf nameservers'
+                sed -i "s/xxxxx/$(grep ^nameserver /etc/resolv.conf | sed 's/^nameserver//' | tr -d '\n')/" /tmp/nginx/default.conf
+                cp /tmp/nginx/default.conf /etc/nginx/conf.d/default.conf
+                service nginx stop; sleep 5
+                sed -i '/default_server;/d' /etc/nginx/nginx.conf
+                service nginx start
+          services:
+            sysvinit:
+              nginx:
+                enabled: true
+                ensureRunning: true
+                files:
+                  - /etc/nginx/conf.d/default.conf
+    Properties:
+      AssociatePublicIpAddress: true
+      ImageId: !Ref ProxyAMI
+      InstanceType: !Ref ProxyInstanceType
+      #KeyName: !Ref ProxyKeyName
+      SecurityGroups:
+        - !Ref SecurityGroupProxyInstances
+      UserData:
+        Fn::Base64: !Sub |
+          #!/usr/bin/env bash
+          export PATH=$PATH:/usr/local/bin
+          which pip &> /dev/null
+          if [ $? -ne 0 ] ; then
+              [ `which yum` ] && $(yum install -y epel-release; yum install -y python-pip) && echo "PIP INSTALLED"
+              [ `which apt-get` ] && apt-get -y update && apt-get -y install python-pip && echo "PIP INSTALLED"
+          fi
+          pip install --upgrade pip &> /dev/null
+          pip install awscli --ignore-installed six &> /dev/null
+          easy_install https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-latest.tar.gz
+          cfn-init -v --stack ${AWS::StackName} --resource AutoScalingConfigProxy --region ${AWS::Region}
+  SecurityGroupProxyELB:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: Security group for Reverse Proxy in DMZ
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: sg-reverse-proxy-dmz
+#        - Key: Environment
+#          Value: !Ref pEnvironment
+  SecurityGroupProxyInstances:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for Reverse Proxy Instances in DMZ
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: !Ref CIDR
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: !Ref CIDR
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref ManagementCIDR
+       #TODO: This hangs cfn-init
+#      SecurityGroupEgress:
+#        - IpProtocol: tcp
+#          FromPort: 80
+#          ToPort: 80
+#          CidrIp: 0.0.0.0/0
+#        - IpProtocol: tcp
+#          FromPort: 443
+#          ToPort: 443
+#          CidrIp: 0.0.0.0/0
+#          - IpProtocol: udp
+#            FromPort: 123
+#            ToPort: 123
+#            CidrIp: !Ref prodVPCCIDR
+      Tags:
+        - Key: Name
+          Value: sg-reverse-proxy-dmz-instances
+#        - Key: Environment
+#          Value: !Ref pEnvironment
+Outputs:
+  ProxyLB:
+    Value: !GetAtt ELBProxy.DNSName

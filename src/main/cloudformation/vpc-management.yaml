@@ -651,6 +651,8 @@ Resources:
 Outputs:
     rVPCManagement:
         Value: !Ref rVPCManagement
+    rVPCManagementCIDR:
+        Value: !Ref pManagementCIDR
     rBastionInstanceIP:
         Condition: cCreateBastionHost
         Value: !If [ cCreateBastionHost, !Ref rEIPProdBastion, '' ]
