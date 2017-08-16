@@ -1,0 +1,247 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: 'RDS Server'
+Parameters:
+
+  ParamName:
+    Type: String
+    Description: A Keyname used to write the intial DB password to the EC2 parameter store
+    Default: ''
+
+  AllocatedStorage:
+    Default: 5
+    Description: The size of the database in Gb
+    Type: Number
+    MinValue: 5
+    MaxValue: 1024
+    ConstraintDescription: must be between 5 and 1024Gb
+
+  Name:
+    Description: The name of the database
+    Type: String
+    MinLength: 4
+    MaxLength: 16
+    AllowedPattern: "[a-zA-Z][a-zA-Z0-9]*"
+    ConstraintDescription: must begin with a letter and contain only alphanumeric characters
+
+  Engine:
+    Description: RDS Database Engine
+    Type: String
+    Default: PostgreSQL
+    AllowedValues:
+      - PostgreSQL
+      - MySQL
+      - MariaDB
+
+  MultiAZDatabase:
+    Description: Create a Multi-AZ RDS database instance
+    Type: String
+    Default: false
+    AllowedValues:
+    - true
+    - false
+    ConstraintDescription: must be either true or false.
+
+  BackupRetention:
+    Default: 7
+    Description: Number of days for which automated backups are retained. Set to 0 to disable backups.
+    Type: Number
+    MinValue: 0
+    MaxValue: 35
+    ConstraintDescription: Must be a number within the inclusive range of 0 and 35
+
+  DeletionPolicy:
+    Description: When stack is terminated should DB retain a snapshot before termination?
+    Type: String
+    Default: Snapshot
+    AllowedValues:
+      - Delete
+      - Snapshot
+
+  VPCID:
+    Description: VPC the RDS instance will be deployed within
+    Type: String
+
+  PrivateSubnetACIDR:
+    Description: Private subnet allowed to connect to RDS instances
+    Type: String
+
+  PrivateSubnetBCIDR:
+    Description: Private subnet allowed to connect to RDS instances
+    Type: String
+
+  DBSubnetA:
+    Description: Private subnet into which RDS instances will be deployed
+    Type: String
+
+  DBSubnetB:
+    Description: Private subnet into which RDS instances will be deployed
+    Type: String
+
+  DBClass:
+    Description: Database instance class
+    Type: String
+    Default: db.t2.small
+    AllowedValues:
+    - db.t2.small
+    - db.t2.medium
+    - db.t2.large
+    - db.m4.large
+    - db.m4.xlarge
+    - db.m4.2xlarge
+    - db.m4.4xlarge
+    - db.m4.10xlarge
+    - db.r3.large
+    - db.r3.xlarge
+    - db.r3.2xlarge
+    - db.r3.4xlarge
+    - db.r3.8xlarge
+    ConstraintDescription: must select a valid database instance type
+
+  DbMasterUsername:
+    Description: Master account username
+    Type: String
+    Default: admin
+
+Resources:
+
+  Db:
+    Type: 'AWS::RDS::DBInstance'
+    DependsOn:
+      - GenerateInitialPassword
+    Properties:
+      AllocatedStorage: !Ref AllocatedStorage
+      VPCSecurityGroups:
+      - !Ref RDSSecurityGroup
+      DBInstanceClass: !Ref DBClass
+      Engine: !Ref Engine
+      #TODO: Add provisioned IOPs
+      StorageType: gp2
+      MultiAZ: !Ref MultiAZDatabase
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      PreferredBackupWindow: 02:00-03:30
+      BackupRetentionPeriod: !Ref BackupRetention
+      PreferredMaintenanceWindow: sun:04:00-sun:06:00
+      DBName: !Ref Name
+      MasterUsername: !Ref DbMasterUsername
+      MasterUserPassword: !GetAtt GenerateInitialPassword.Password
+    DeletionPolicy: Snapshot
+
+  DBSubnetGroup:
+      Type: 'AWS::RDS::DBSubnetGroup'
+      Properties:
+        DBSubnetGroupDescription: Subnets available for RDS instances
+        SubnetIds:
+        - !Ref DBSubnetA
+        - !Ref DBSubnetB
+
+  RDSSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: 'Security Group For RDS Instances'
+      SecurityGroupIngress:
+      - IpProtocol: TCP
+        FromPort: !FindInMap [ DBEngineToPort, !Ref Engine, Port ]
+        ToPort: !FindInMap [ DBEngineToPort, !Ref Engine, Port ]
+        CidrIp: !Ref PrivateSubnetACIDR
+      - IpProtocol: TCP
+        FromPort: !FindInMap [ DBEngineToPort, !Ref Engine, Port ]
+        ToPort: !FindInMap [ DBEngineToPort, !Ref Engine, Port ]
+        CidrIp: !Ref PrivateSubnetBCIDR
+      VpcId: !Ref VPCID
+
+  LambdaExecutionRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+      Policies:
+        - PolicyName: ParamaterStore
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'ssm:PutParameter'
+                Resource: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ParamName}'
+
+  GeneratePasswordFunction:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: index.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        ZipFile: !Sub |
+          import boto3
+          import httplib
+          import urlparse
+          import json
+          import random
+          import string
+          PWD_LENGTH=20
+          def send_response(request, response, status=None, reason=None):
+              if 'ResponseURL' in request and request['ResponseURL']:
+                  url = urlparse.urlparse(request['ResponseURL'])
+                  body = json.dumps(response)
+                  https = httplib.HTTPSConnection(url.hostname)
+                  https.request('PUT', url.path+'?'+url.query, body)
+              return response
+          def lambda_handler(event, context):
+              try:
+                  param_name = event['ResourceProperties']['ParamName']
+              except KeyError:
+                  print 'no ec2 param store keyname found'
+              ssm = boto3.client('ssm')
+              response = {
+                      'StackId': event['StackId'],
+                      'RequestId': event['RequestId'],
+                      'PhysicalResourceId': 'GeneratePasswordFunction',
+                      'LogicalResourceId': event['LogicalResourceId'],
+                      'Status': 'SUCCESS'
+                  }
+              valid_characters = string.ascii_letters+string.digits
+              pwd = ''.join(random.choice(valid_characters) for i in range(PWD_LENGTH))
+              ssm.put_parameter(Name=param_name, Description='DB Password', Value=pwd, Type='SecureString')
+              response['Data'] = {'Password': pwd }
+              return send_response(event, response)
+      Runtime: python2.7
+
+  FunctionLogGroup:
+    Type: 'AWS::Logs::LogGroup'
+    DependsOn: GeneratePasswordFunction
+    Properties:
+      LogGroupName: !Join ['', ['/aws/lambda/', !Ref GeneratePasswordFunction ]]
+      RetentionInDays: 7
+
+  GenerateInitialPassword:
+    Type: 'AWS::CloudFormation::CustomResource'
+    DependsOn:
+      - FunctionLogGroup
+    Properties:
+      ParamName: !Ref ParamName
+      ServiceToken: !GetAtt GeneratePasswordFunction.Arn
+
+Mappings:
+  DBEngineToPort:
+    MariaDB:
+      Port: 3306
+    MySQL:
+      Port: 3306
+    PostgreSQL:
+      Port: 5432
+
+Outputs:
+
+  EndPoint:
+    Value: !GetAtt Db.Endpoint.Address
+
+  Port:
+    Value: !GetAtt Db.Endpoint.Port
