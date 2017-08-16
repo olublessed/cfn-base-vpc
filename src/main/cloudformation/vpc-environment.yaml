@@ -546,8 +546,12 @@ Outputs:
         Value: !Ref rVPC
     rDMZSubnetA:
         Value: !Ref rDMZSubnetA
+    rDMZSubnetACIDR:
+        Value: !Ref pDMZSubnetACIDR
     rDMZSubnetB:
         Value: !Ref rDMZSubnetB
+    rDMZSubnetBCIDR:
+        Value: !Ref pDMZSubnetBCIDR
     rRouteTablePrivateA:
         Value: !Ref rRouteTablePrivateA
     rRouteTablePrivateB:
@@ -556,12 +560,20 @@ Outputs:
         Value: !Ref rRouteTableDMZ
     rAppPrivateSubnetA:
         Value: !Ref rAppPrivateSubnetA
+    rAppPrivateSubnetACIDR:
+        Value: !Ref pAppPrivateSubnetACIDR
     rAppPrivateSubnetB:
         Value: !Ref rAppPrivateSubnetB
+    rAppPrivateSubnetBCIDR:
+        Value: !Ref pAppPrivateSubnetBCIDR
     rDBPrivateSubnetA:
         Value: !Ref rDBPrivateSubnetA
+    rDBPrivateSubnetACIDR:
+        Value: !Ref pDBPrivateSubnetACIDR
     rDBPrivateSubnetB:
         Value: !Ref rDBPrivateSubnetB
+    rDBPrivateSubnetBCIDR:
+        Value: !Ref pDBPrivateSubnetBCIDR
     rSecurityGroupVpcNat:
         Value: !Ref rSecurityGroupVpcNat
     CfnStacksId:
