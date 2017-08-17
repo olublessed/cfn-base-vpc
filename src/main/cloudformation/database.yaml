@@ -171,7 +171,7 @@ Resources:
               - Effect: Allow
                 Action:
                   - 'ssm:PutParameter'
-                Resource: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ParamName}'
+                Resource: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/*'
 
   GeneratePasswordFunction:
     Type: 'AWS::Lambda::Function'
@@ -186,7 +186,7 @@ Resources:
           import json
           import random
           import string
-          PWD_LENGTH=20
+          DEFAULT_PWD_LENGTH=20
           def send_response(request, response, status=None, reason=None):
               if 'ResponseURL' in request and request['ResponseURL']:
                   url = urlparse.urlparse(request['ResponseURL'])
@@ -195,21 +195,26 @@ Resources:
                   https.request('PUT', url.path+'?'+url.query, body)
               return response
           def lambda_handler(event, context):
+              response = {
+                  'StackId': event['StackId'],
+                  'RequestId': event['RequestId'],
+                  'PhysicalResourceId': 'GeneratePasswordFunction',
+                  'LogicalResourceId': event['LogicalResourceId'],
+                  'Status': 'SUCCESS'
+              }
+              pwd_length = DEFAULT_PWD_LENGTH
+              try:
+                  pwd_length = int(event['ResourceProperties']['Length'])
+              except:
+                  print 'using default length of ' + str(DEFAULT_PWD_LENGTH)
+              valid_characters = string.ascii_letters+string.digits
+              pwd = ''.join(random.choice(valid_characters) for i in range(pwd_length))
               try:
                   param_name = event['ResourceProperties']['ParamName']
-              except KeyError:
-                  print 'no ec2 param store keyname found'
-              ssm = boto3.client('ssm')
-              response = {
-                      'StackId': event['StackId'],
-                      'RequestId': event['RequestId'],
-                      'PhysicalResourceId': 'GeneratePasswordFunction',
-                      'LogicalResourceId': event['LogicalResourceId'],
-                      'Status': 'SUCCESS'
-                  }
-              valid_characters = string.ascii_letters+string.digits
-              pwd = ''.join(random.choice(valid_characters) for i in range(PWD_LENGTH))
-              ssm.put_parameter(Name=param_name, Description='DB Password', Value=pwd, Type='SecureString')
+                  ssm = boto3.client('ssm')
+                  ssm.put_parameter(Name=param_name, Description='DB Password', Value=pwd, Type='SecureString', Overwrite=True)
+              except:
+                  print 'skipping key write'
               response['Data'] = {'Password': pwd }
               return send_response(event, response)
       Runtime: python2.7
@@ -227,6 +232,7 @@ Resources:
       - FunctionLogGroup
     Properties:
       ParamName: !Ref ParamName
+      Length: 25
       ServiceToken: !GetAtt GeneratePasswordFunction.Arn
 
 Mappings:
@@ -245,3 +251,6 @@ Outputs:
 
   Port:
     Value: !GetAtt Db.Endpoint.Port
+
+  PasswordFunctionArn:
+    Value: !GetAtt GeneratePasswordFunction.Arn
