@@ -1,5 +1,5 @@
 plugins {
-    id 'com.cfnstacks.gradle.artifacts3' version '0.1.6'
+    id 'com.cfnstacks.gradle.artifacts3' version '0.1.8'
 }
 
 group = 'com.cfnstacks'

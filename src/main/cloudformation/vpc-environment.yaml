@@ -73,12 +73,13 @@ Parameters:
         Type: String
         Default: ''
     pFlowLogGroup:
-          Description: Log Group for capturing VPC Flow Logs
-          Type: String
-          Default: ''
-    pTemplates:
-        Description: Location of templates
+        Description: Log Group for capturing VPC Flow Logs
         Type: String
+        Default: ''
+    StackTemplates:
+        Description: Template service base URL
+        Type: String
+        Default: https://s3.us-east-2.amazonaws.com/cfn-stacks.com/templates
 Resources:
     rVPC:
         Type: 'AWS::EC2::VPC'
@@ -241,7 +242,7 @@ Resources:
         Type: 'AWS::CloudFormation::Stack'
         Condition: cNeedNatInstance
         Properties:
-            TemplateURL: !Sub '${pTemplates}/nat-instance.yaml'
+            TemplateURL: !Sub ${StackTemplates}/@templatePath@/nat-instance.yaml
             TimeoutInMinutes: 20
             Parameters:
                 pDMZSubnetA: !Ref rDMZSubnetA
