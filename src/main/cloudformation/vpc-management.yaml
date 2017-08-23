@@ -332,6 +332,8 @@ Resources:
                 DeviceIndex: 0
             UserData: !Base64 |
                 #!/bin/bash
+                sed -i 's/Port 22/Port 22\nPort 443\n/g' /etc/ssh/sshd_config # Allow alt port ssh
+                service sshd restart
                 yum update -y
     rEIPProdBastion:
         Type: 'AWS::EC2::EIP'
