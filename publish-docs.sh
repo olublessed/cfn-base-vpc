@@ -4,7 +4,7 @@ set -ex
 
 command -v aws >/dev/null 2>&1 || { pip install --user awscli; export PATH=$PATH:$HOME/.local/bin; }
 
-ARTIFACT=cfn-multi-vpc
+ARTIFACT=cfn-base-vpc
 PROJECT_VERSION=$(./gradlew --quiet projectVersion)
 
 publish_site() {
